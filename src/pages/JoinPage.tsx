@@ -1,48 +1,67 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { supabase, getOrCreateAnonymousUser } from '../lib/supabase';
-import type { Group } from '../types';
-import { saveJoinedGroupId } from '../utils/storage';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Ticket } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { AuthModal } from '../components/AuthModal';
 
 export function JoinPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
-  const [userName, setUserName] = useState('');
-  const [groupInfo, setGroupInfo] = useState<Group | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [group, setGroup] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [joining, setJoining] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchGroupByToken = async () => {
-      if (!token) return;
-      const { data } = await supabase.from('groups').select('*').eq('invite_token', token).single();
-      if (data) setGroupInfo(data);
-      setLoading(false);
-    };
-    fetchGroupByToken();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setCurrentUser(user);
+    });
+
+    if (token) {
+      supabase
+        .from('groups')
+        .select('*')
+        .eq('invite_token', token)
+        .single()
+        .then(({ data }) => setGroup(data));
+    }
   }, [token]);
 
-  const handleJoin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userName.trim() || !groupInfo) return;
+  const handleJoin = async () => {
+    if (!currentUser) {
+      setShowAuthModal(true);
+      return;
+    }
+    if (!group) return;
 
     setJoining(true);
     try {
-      const user = await getOrCreateAnonymousUser();
-      if (!user) throw new Error('ユーザー情報の取得に失敗しました');
+      const displayName =
+        currentUser.user_metadata?.display_name ||
+        currentUser.email?.split('@')[0] ||
+        'メンバー';
 
-      const { error } = await supabase.from('group_members').upsert([{
-        group_id: groupInfo.id,
-        user_id: user.id,
-        display_name: userName,
-        role: 'member'
-      }]);
+      // 既にグループへ参加済みか確認
+      const { data: existing } = await supabase
+        .from('group_members')
+        .select('id')
+        .eq('group_id', group.id)
+        .eq('user_id', currentUser.id)
+        .single();
 
-      if (error) throw error;
+      if (!existing) {
+        await supabase.from('group_members').insert([
+          {
+            group_id: group.id,
+            user_id: currentUser.id,
+            display_name: displayName,
+            role: 'member',
+          },
+        ]);
+      }
 
-      saveJoinedGroupId(groupInfo.id);
-      navigate(`/group/${groupInfo.id}`);
+      navigate(`/group/${group.id}`, { replace: true });
     } catch (err: any) {
       alert(`参加に失敗しました: ${err.message}`);
     } finally {
@@ -50,38 +69,50 @@ export function JoinPage() {
     }
   };
 
-  if (loading) return <div className="p-8 text-center text-sm text-slate-400">招待を確認中...</div>;
-  if (!groupInfo) return <div className="p-8 text-center text-sm text-rose-500">無効な招待URLです</div>;
+  if (!token || !group) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-['Noto_Sans_JP']">
+        <div className="bg-white rounded-3xl p-6 text-center max-w-sm w-full space-y-2">
+          <p className="text-xs font-bold text-slate-700">無効な招待リンクです</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col justify-center px-4 pt-safe pb-safe">
-      <div className="max-w-md w-full mx-auto bg-white rounded-3xl shadow-sm p-6 border border-slate-200/80">
-        <h2 className="text-lg font-bold text-slate-800 mb-1">グループ参加</h2>
-        <p className="text-slate-500 text-xs mb-6">
-          「<span className="font-semibold text-indigo-600">{groupInfo.name}</span>」に参加します
-        </p>
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-['Noto_Sans_JP']">
+      <div className="bg-white rounded-3xl p-6 text-center max-w-sm w-full space-y-4 shadow-xl border border-slate-200/80">
+        <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl w-fit mx-auto">
+          <Ticket className="w-8 h-8" />
+        </div>
+        <div>
+          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+            招待
+          </span>
+          <h2 className="text-lg font-bold text-slate-900 mt-1">{group.name}</h2>
+          <p className="text-xs text-slate-500 mt-0.5">グループへの参加招待が届いています</p>
+        </div>
 
-        <form onSubmit={handleJoin} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5 ml-1">ニックネーム</label>
-            <input
-              type="text"
-              required
-              placeholder="例: さとう"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 text-sm focus:bg-white focus:outline-none"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={joining}
-            className="w-full py-3.5 bg-indigo-600 active:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-200 transition"
-          >
-            {joining ? '参加登録中...' : '参加して開く'}
-          </button>
-        </form>
+        <button
+          onClick={handleJoin}
+          disabled={joining}
+          className="w-full py-2.5 bg-indigo-600 active:bg-indigo-700 text-white font-bold rounded-xl text-xs transition"
+        >
+          {joining ? '参加処理中...' : currentUser ? 'このグループに参加する' : 'ログインして参加する'}
+        </button>
       </div>
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={() => {
+          supabase.auth.getUser().then(({ data: { user } }) => {
+            setCurrentUser(user);
+          });
+        }}
+      />
     </div>
   );
 }
+
+export default JoinPage;

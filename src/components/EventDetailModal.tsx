@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Edit2, X, Share2, Check } from 'lucide-react';
+import { Calendar, Edit2, X, Share2, Check, Clock, Bell } from 'lucide-react';
 import { supabase, getOrCreateAnonymousUser } from '../lib/supabase';
 import type { EventItem, EventSession, Application, MemberDemand, GroupMember } from '../types/index';
 import { formatDateSlash } from './CalendarView';
@@ -80,9 +80,11 @@ export function EventDetailModal({
     }
   };
 
-  const handleToggleDemand = async (sessionId: string) => {
-    if (!currentUser || !eventId) return;
-    const existing = demands.find((d) => d.user_id === currentUser.id && d.session_id === sessionId);
+  // ゲストまたは自分の希望をトグル
+  const handleToggleDemand = async (sessionId: string, targetUserId?: string) => {
+    const uid = targetUserId || currentUser?.id;
+    if (!uid || !eventId) return;
+    const existing = demands.find((d) => d.user_id === uid && d.session_id === sessionId);
 
     if (existing) {
       await supabase.from('member_demands').delete().eq('id', existing.id);
@@ -90,24 +92,28 @@ export function EventDetailModal({
     } else {
       const { data, error } = await supabase
         .from('member_demands')
-        .insert([{ event_id: eventId, user_id: currentUser.id, session_id: sessionId }])
+        .insert([{ event_id: eventId, user_id: uid, session_id: sessionId }])
         .select()
         .single();
       if (!error && data) setDemands([...demands, data]);
     }
   };
 
+  // ゲスト名義または自分名義で申込
   const handleAddApplication = async (
     sessionId: string,
     ticketCount: number,
     pairUserId: string,
-    paymentMethod?: string
+    paymentMethod?: string,
+    applicantUserId?: string
   ) => {
-    if (!currentUser || !eventId) return;
+    const applicantId = applicantUserId || currentUser?.id;
+    if (!applicantId || !eventId) return;
+
     const insertPayload: any = {
       event_id: eventId,
       session_id: sessionId,
-      applicant_user_id: currentUser.id,
+      applicant_user_id: applicantId,
       pair_user_id: pairUserId || null,
       ticket_count: ticketCount,
       status: 'pending',
@@ -142,7 +148,6 @@ export function EventDetailModal({
       className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto font-['Noto_Sans_JP']"
     >
       <div className="bg-white rounded-3xl w-full max-w-md max-h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-        {/* ヘッダー操作バー */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
           <div className="flex items-center gap-2">
             {!isEditing && (
@@ -176,7 +181,6 @@ export function EventDetailModal({
           </button>
         </div>
 
-        {/* スクロールコンテンツ */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1">
           {loading || !event ? (
             <div className="py-8 text-center text-xs text-slate-400">読み込み中...</div>
@@ -198,14 +202,30 @@ export function EventDetailModal({
           ) : (
             <>
               <div>
-                <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-xs">
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>{formatDateSlash(event.event_date)}</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-xs">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>{formatDateSlash(event.event_date)}</span>
+                  </div>
+
+                  {event.application_deadline && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
+                      <Clock className="w-3 h-3" />
+                      締切: {formatDateSlash(event.application_deadline)}
+                    </span>
+                  )}
+
+                  {event.lottery_result_date && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
+                      <Bell className="w-3 h-3" />
+                      発表: {formatDateSlash(event.lottery_result_date)}
+                    </span>
+                  )}
                 </div>
-                <h2 className="text-base font-bold text-slate-800 mt-0.5">{event.title}</h2>
+
+                <h2 className="text-base font-bold text-slate-800 mt-1">{event.title}</h2>
               </div>
 
-              {/* 料金サマリー */}
               <div className="bg-slate-50 rounded-2xl p-2.5 border border-slate-200/80 flex items-center justify-around text-center text-xs">
                 <div>
                   <span className="text-[10px] text-slate-400 block">単価</span>
@@ -223,7 +243,6 @@ export function EventDetailModal({
                 </div>
               </div>
 
-              {/* チケット照合 */}
               <EventSessionSection
                 sessions={sessions}
                 applications={applications}
@@ -233,7 +252,6 @@ export function EventDetailModal({
                 onToggleDemand={handleToggleDemand}
               />
 
-              {/* 申込状況 */}
               <EventApplicationSection
                 event={event}
                 applications={applications}

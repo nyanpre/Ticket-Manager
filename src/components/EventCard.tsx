@@ -1,5 +1,5 @@
-import { Calendar, ChevronRight, CheckCircle2, Clock } from 'lucide-react';
-import type { EventItem, EventSession, Application, MemberDemand } from '../types';
+import { Calendar, ChevronRight, CheckCircle2, Clock, Bell } from 'lucide-react';
+import type { EventItem, EventSession, Application, MemberDemand } from '../types/index';
 
 interface Props {
   event: EventItem;
@@ -20,14 +20,33 @@ export function EventCard({ event, sessions = [], applications = [], demands = [
   return (
     <div
       onClick={onClick}
-      className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm space-y-2.5 active:bg-slate-50 transition cursor-pointer"
+      className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm space-y-2.5 active:bg-slate-50 transition cursor-pointer font-['Noto_Sans_JP']"
     >
       <div className="flex items-start justify-between">
         <div className="space-y-1">
-          <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-xs">
-            <Calendar className="w-3.5 h-3.5" />
-            <span>{formattedDate}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-xs">
+              <Calendar className="w-3.5 h-3.5" />
+              <span>{formattedDate}</span>
+            </div>
+
+            {/* 申込期限バッジ */}
+            {event.application_deadline && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200/60">
+                <Clock className="w-2.5 h-2.5" />
+                締切: {event.application_deadline.replace(/-/g, '/')}
+              </span>
+            )}
+
+            {/* 当落発表バッジ */}
+            {event.lottery_result_date && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-md border border-blue-200/60">
+                <Bell className="w-2.5 h-2.5" />
+                発表: {event.lottery_result_date.replace(/-/g, '/')}
+              </span>
+            )}
           </div>
+
           <span className="text-sm font-bold text-slate-800 block leading-snug">{event.title}</span>
           <div className="text-[11px] text-slate-400 flex items-center gap-2">
             <span>単価 ¥{event.ticket_price.toLocaleString()}</span>
@@ -38,7 +57,7 @@ export function EventCard({ event, sessions = [], applications = [], demands = [
         <ChevronRight className="w-4 h-4 text-slate-300 mt-1 shrink-0" />
       </div>
 
-      {/* 公演枠ごとの状況プレビュー */}
+      {/* 公演枠ごとの状況 */}
       {evSessions.length > 0 && (
         <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
           {evSessions.map((s) => {

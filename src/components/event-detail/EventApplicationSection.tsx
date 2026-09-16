@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, CheckCircle2, XCircle, Clock } from 'lucide-react';
-import type { Application, EventSession, GroupMember, EventItem } from '../../types';
+import type { Application, EventSession, GroupMember, EventItem } from '../../types/index';
 
 interface Props {
   event: EventItem;
@@ -8,7 +8,13 @@ interface Props {
   sessions: EventSession[];
   members: GroupMember[];
   currentUserId?: string;
-  onAddApplication: (sessionId: string, ticketCount: number, pairUserId: string, paymentMethod?: string) => Promise<void>;
+  onAddApplication: (
+    sessionId: string,
+    ticketCount: number,
+    pairUserId: string,
+    paymentMethod?: string,
+    applicantUserId?: string
+  ) => Promise<void>;
   onStatusChange: (appId: string, status: 'pending' | 'won' | 'lost') => Promise<void>;
 }
 
@@ -23,6 +29,7 @@ export function EventApplicationSection({
 }: Props) {
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [applySessionId, setApplySessionId] = useState(sessions[0]?.id || '');
+  const [applyApplicantUid, setApplyApplicantUid] = useState(currentUserId || '');
   const [applyCount, setApplyCount] = useState(2);
   const [applyPairUid, setApplyPairUid] = useState('');
   const [applyPaymentMethod, setApplyPaymentMethod] = useState('');
@@ -35,11 +42,18 @@ export function EventApplicationSection({
     if (!applySessionId) return;
     setSubmitting(true);
     try {
-      await onAddApplication(applySessionId, applyCount, applyPairUid, applyPaymentMethod || undefined);
+      await onAddApplication(
+        applySessionId,
+        applyCount,
+        applyPairUid,
+        applyPaymentMethod || undefined,
+        applyApplicantUid || currentUserId
+      );
       setShowApplyForm(false);
       setApplyPairUid('');
       setApplyCount(2);
       setApplyPaymentMethod('');
+      setApplyApplicantUid(currentUserId || '');
     } finally {
       setSubmitting(false);
     }
@@ -52,6 +66,7 @@ export function EventApplicationSection({
         <button
           onClick={() => {
             if (!applySessionId && sessions.length > 0) setApplySessionId(sessions[0].id);
+            if (!applyApplicantUid && currentUserId) setApplyApplicantUid(currentUserId);
             setShowApplyForm(!showApplyForm);
           }}
           className="text-[11px] text-indigo-600 font-bold flex items-center gap-0.5"
@@ -63,19 +78,35 @@ export function EventApplicationSection({
 
       {showApplyForm && (
         <form onSubmit={handleSubmit} className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-2.5">
-          <div>
-            <label className="block text-[10px] font-bold text-slate-600 mb-1">枠</label>
-            <select
-              value={applySessionId}
-              onChange={(e) => setApplySessionId(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-            >
-              {sessions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">申込者（名義）</label>
+              <select
+                value={applyApplicantUid}
+                onChange={(e) => setApplyApplicantUid(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+              >
+                {members.map((m) => (
+                  <option key={m.id} value={m.user_id}>
+                    {m.display_name} {m.user_id === currentUserId ? '(自分)' : m.is_guest ? '(ゲスト)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">公演枠</label>
+              <select
+                value={applySessionId}
+                onChange={(e) => setApplySessionId(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+              >
+                {sessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -91,7 +122,7 @@ export function EventApplicationSection({
               />
             </div>
             <div>
-              <label className="block text-[10px] font-bold text-slate-600 mb-1">同行指定</label>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">同行指定（任意）</label>
               <select
                 value={applyPairUid}
                 onChange={(e) => setApplyPairUid(e.target.value)}
@@ -99,10 +130,10 @@ export function EventApplicationSection({
               >
                 <option value="">指定なし</option>
                 {members
-                  .filter((m) => m.user_id !== currentUserId)
+                  .filter((m) => m.user_id !== applyApplicantUid)
                   .map((m) => (
                     <option key={m.id} value={m.user_id}>
-                      {m.display_name}
+                      {m.display_name} {m.is_guest ? '(ゲスト)' : ''}
                     </option>
                   ))}
               </select>
@@ -149,8 +180,6 @@ export function EventApplicationSection({
             const sessionName = sessions.find((s) => s.id === app.session_id)?.name || '';
             const applicantName = getMemberName(app.applicant_user_id);
             const pairName = app.pair_user_id ? getMemberName(app.pair_user_id) : null;
-
-            // 支払い総計（単価×枚数 + 申込手数料 + 発券手数料×枚数）
             const totalCost = (event.ticket_price * app.ticket_count) + event.system_fee + (event.ticketing_fee * app.ticket_count);
 
             return (

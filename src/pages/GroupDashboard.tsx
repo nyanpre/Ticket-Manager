@@ -168,6 +168,7 @@ export function GroupDashboard() {
           onOpenMyPage={() => setShowMyPage(true)}
           onOpenSettlement={() => setShowSettlement(true)}
           onOpenActivity={() => setShowActivity(true)}
+          onMemberUpdated={() => fetchGroupData(true)}
         />
 
         {/* コントロールバー */}

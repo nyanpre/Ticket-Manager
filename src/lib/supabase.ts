@@ -9,9 +9,24 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// 匿名ログインまたは既存セッションの取得
+/**
+ * 現在ログイン中のユーザーを取得
+ */
+export const getCurrentUser = async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
+};
+
+/**
+ * セッション取得または匿名ユーザー生成
+ * （既存コンポーネントの後方互換性を担保）
+ */
 export const getOrCreateAnonymousUser = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
   if (session?.user) {
     return session.user;
   }

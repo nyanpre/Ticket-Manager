@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { CircleDollarSign, ArrowRight, X, CheckCircle2, TrendingUp, TrendingDown } from 'lucide-react';
-import type { GroupMember, EventItem, Application, MemberDemand } from '../types';
+import type { GroupMember, EventItem, Application, MemberDemand } from '../types/index';
 
 interface Props {
   isOpen: boolean;
@@ -67,6 +67,7 @@ export function SettlementModal({ isOpen, onClose, members, events, applications
     const balances = members.map((m) => ({
       userId: m.user_id,
       name: m.display_name,
+      isGuest: m.is_guest || m.user_id.startsWith('guest_'),
       amount: balanceMap[m.user_id] || 0,
     }));
 
@@ -108,7 +109,7 @@ export function SettlementModal({ isOpen, onClose, members, events, applications
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto font-['Noto_Sans_JP']"
     >
       <div className="bg-white rounded-3xl w-full max-w-md max-h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* ヘッダー */}
@@ -177,7 +178,14 @@ export function SettlementModal({ isOpen, onClose, members, events, applications
                     key={b.userId}
                     className="p-2.5 bg-white border border-slate-200/70 rounded-xl flex items-center justify-between text-xs"
                   >
-                    <span className="font-semibold text-slate-700">{b.name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-slate-700">{b.name}</span>
+                      {b.isGuest && (
+                        <span className="text-[10px] text-slate-500 bg-slate-100 border border-slate-200/70 px-1.5 py-0.5 rounded">
+                          ゲスト
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1 font-bold">
                       {isPositive && (
                         <span className="flex items-center text-emerald-600">

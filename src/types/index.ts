@@ -11,6 +11,7 @@ export interface GroupMember {
   user_id: string;
   display_name: string;
   role: 'admin' | 'member';
+  is_guest?: boolean;
   created_at: string;
 }
 
@@ -22,6 +23,8 @@ export interface EventItem {
   ticket_price: number;
   system_fee: number;
   ticketing_fee: number;
+  application_deadline?: string | null; // 申込期限 (例: "2026-10-01" または "2026-10-01T23:59")
+  lottery_result_date?: string | null;  // 当落発表 (例: "2026-10-08" または "2026-10-08T13:00")
   created_at: string;
 }
 
