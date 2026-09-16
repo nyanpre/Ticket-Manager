@@ -40,7 +40,8 @@ export interface Application {
   pair_user_id: string | null;
   ticket_count: number;
   status: 'pending' | 'won' | 'lost';
-  is_paid: boolean;
+  is_paid?: boolean;
+  payment_method?: string | null; // ★ここを追加
   created_at: string;
 }
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Calendar, Edit2, X, Share2, Check } from 'lucide-react';
 import { supabase, getOrCreateAnonymousUser } from '../lib/supabase';
-import type { EventItem, EventSession, Application, MemberDemand, GroupMember } from '../types';
+import type { EventItem, EventSession, Application, MemberDemand, GroupMember } from '../types/index';
 import { formatDateSlash } from './CalendarView';
 import { EventEditForm } from './event-detail/EventEditForm';
 import { EventSessionSection } from './event-detail/EventSessionSection';
@@ -97,18 +97,28 @@ export function EventDetailModal({
     }
   };
 
-  const handleAddApplication = async (sessionId: string, ticketCount: number, pairUserId: string) => {
+  const handleAddApplication = async (
+    sessionId: string,
+    ticketCount: number,
+    pairUserId: string,
+    paymentMethod?: string
+  ) => {
     if (!currentUser || !eventId) return;
+    const insertPayload: any = {
+      event_id: eventId,
+      session_id: sessionId,
+      applicant_user_id: currentUser.id,
+      pair_user_id: pairUserId || null,
+      ticket_count: ticketCount,
+      status: 'pending',
+    };
+    if (paymentMethod) {
+      insertPayload.payment_method = paymentMethod;
+    }
+
     const { data, error } = await supabase
       .from('applications')
-      .insert([{
-        event_id: eventId,
-        session_id: sessionId,
-        applicant_user_id: currentUser.id,
-        pair_user_id: pairUserId || null,
-        ticket_count: ticketCount,
-        status: 'pending',
-      }])
+      .insert([insertPayload])
       .select()
       .single();
 
@@ -129,7 +139,7 @@ export function EventDetailModal({
   return (
     <div
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto font-['Noto_Sans_JP']"
     >
       <div className="bg-white rounded-3xl w-full max-w-md max-h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* ヘッダー操作バー */}
@@ -213,7 +223,7 @@ export function EventDetailModal({
                 </div>
               </div>
 
-              {/* 公演枠・需給照合 */}
+              {/* チケット照合 */}
               <EventSessionSection
                 sessions={sessions}
                 applications={applications}
@@ -223,8 +233,9 @@ export function EventDetailModal({
                 onToggleDemand={handleToggleDemand}
               />
 
-              {/* 申込・当落明細 */}
+              {/* 申込状況 */}
               <EventApplicationSection
+                event={event}
                 applications={applications}
                 sessions={sessions}
                 members={members}

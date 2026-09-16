@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import { Plus, CheckCircle2, XCircle, Clock } from 'lucide-react';
-import type { Application, EventSession, GroupMember } from '../../types';
+import type { Application, EventSession, GroupMember, EventItem } from '../../types';
 
 interface Props {
+  event: EventItem;
   applications: Application[];
   sessions: EventSession[];
   members: GroupMember[];
   currentUserId?: string;
-  onAddApplication: (sessionId: string, ticketCount: number, pairUserId: string) => Promise<void>;
+  onAddApplication: (sessionId: string, ticketCount: number, pairUserId: string, paymentMethod?: string) => Promise<void>;
   onStatusChange: (appId: string, status: 'pending' | 'won' | 'lost') => Promise<void>;
 }
 
 export function EventApplicationSection({
+  event,
   applications,
   sessions,
   members,
@@ -23,6 +25,7 @@ export function EventApplicationSection({
   const [applySessionId, setApplySessionId] = useState(sessions[0]?.id || '');
   const [applyCount, setApplyCount] = useState(2);
   const [applyPairUid, setApplyPairUid] = useState('');
+  const [applyPaymentMethod, setApplyPaymentMethod] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const getMemberName = (uid: string) => members.find((m) => m.user_id === uid)?.display_name || '未登録';
@@ -32,10 +35,11 @@ export function EventApplicationSection({
     if (!applySessionId) return;
     setSubmitting(true);
     try {
-      await onAddApplication(applySessionId, applyCount, applyPairUid);
+      await onAddApplication(applySessionId, applyCount, applyPairUid, applyPaymentMethod || undefined);
       setShowApplyForm(false);
       setApplyPairUid('');
       setApplyCount(2);
+      setApplyPaymentMethod('');
     } finally {
       setSubmitting(false);
     }
@@ -44,7 +48,7 @@ export function EventApplicationSection({
   return (
     <div className="space-y-2 pt-2 border-t border-slate-100">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-800">申込・当落明細</span>
+        <span className="text-xs font-bold text-slate-800">申込状況</span>
         <button
           onClick={() => {
             if (!applySessionId && sessions.length > 0) setApplySessionId(sessions[0].id);
@@ -105,6 +109,19 @@ export function EventApplicationSection({
             </div>
           </div>
 
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 mb-1">支払い方法 (任意)</label>
+            <select
+              value={applyPaymentMethod}
+              onChange={(e) => setApplyPaymentMethod(e.target.value)}
+              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+            >
+              <option value="">未指定</option>
+              <option value="credit">クレジットカード</option>
+              <option value="convenience">コンビニ決済</option>
+            </select>
+          </div>
+
           <div className="flex gap-2 pt-1">
             <button
               type="button"
@@ -133,16 +150,34 @@ export function EventApplicationSection({
             const applicantName = getMemberName(app.applicant_user_id);
             const pairName = app.pair_user_id ? getMemberName(app.pair_user_id) : null;
 
+            // 支払い総計（単価×枚数 + 申込手数料 + 発券手数料×枚数）
+            const totalCost = (event.ticket_price * app.ticket_count) + event.system_fee + (event.ticketing_fee * app.ticket_count);
+
             return (
               <div key={app.id} className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-[10px] bg-white border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-semibold">
-                      {sessionName}
-                    </span>
-                    <div className="text-xs font-bold text-slate-800 mt-1">
-                      {applicantName} 名義（{app.ticket_count}枚）
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] bg-white border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-semibold">
+                        {sessionName}
+                      </span>
+                      {app.payment_method === 'credit' && (
+                        <span className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/60 px-1.5 py-0.5 rounded">
+                          クレカ
+                        </span>
+                      )}
+                      {app.payment_method === 'convenience' && (
+                        <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/60 px-1.5 py-0.5 rounded">
+                          コンビニ
+                        </span>
+                      )}
                     </div>
+
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-800 mt-1">
+                      <span>{applicantName}（{app.ticket_count}枚）</span>
+                      <span className="font-extrabold text-slate-900">¥{totalCost.toLocaleString()}</span>
+                    </div>
+
                     {pairName && <div className="text-[10px] text-slate-400">同行: {pairName}</div>}
                   </div>
 

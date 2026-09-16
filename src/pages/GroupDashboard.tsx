@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Ticket, Plus, List, Calendar as CalendarIcon, Table as TableIcon, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import type { Group, GroupMember, EventItem, EventSession, Application, MemberDemand } from '../types';
+import type { Group, GroupMember, EventItem, EventSession, Application, MemberDemand } from '../types/index';
 import { GroupHeader } from '../components/GroupHeader';
 import { EventCard } from '../components/EventCard';
 import { CreateEventModal } from '../components/CreateEventModal';
@@ -160,7 +160,7 @@ export function GroupDashboard() {
   if (!group) return <div className="p-8 text-center text-xs text-slate-400">読み込み中...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col pt-safe pb-safe">
+    <div className="min-h-screen bg-slate-100 flex flex-col pt-safe pb-safe font-['Noto_Sans_JP']">
       <div className="max-w-md w-full mx-auto px-4 py-4 space-y-4 flex-1">
         <GroupHeader
           group={group}
@@ -300,7 +300,7 @@ export function GroupDashboard() {
             sessions={sessions}
             demands={demands}
             applications={applications}
-            onSelectEvent={(ev) => setSelectedEventId(ev.id)}
+            onSelectEvent={(ev: EventItem) => setSelectedEventId(ev.id)}
           />
         )}
       </div>

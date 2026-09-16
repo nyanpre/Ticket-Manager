@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
-import type { EventItem, EventSession, Application, MemberDemand } from '../types';
+import type { EventItem, EventSession, Application, MemberDemand } from '../types/index';
 import { formatDateSlash } from './CalendarView';
 
-interface Props {
+export interface TableViewProps {
   events: EventItem[];
   sessions: EventSession[];
   demands: MemberDemand[];
@@ -10,7 +10,7 @@ interface Props {
   onSelectEvent: (event: EventItem) => void;
 }
 
-export function TableView({ events, sessions, demands, applications, onSelectEvent }: Props) {
+export function TableView({ events, sessions, demands, applications, onSelectEvent }: TableViewProps) {
   const availableMonths = useMemo(() => {
     const set = new Set<string>();
     events.forEach((ev) => {
@@ -29,7 +29,7 @@ export function TableView({ events, sessions, demands, applications, onSelectEve
   }, [events, selectedMonth]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 font-['Noto_Sans_JP']">
       {/* 期間絞り込みフィルター */}
       <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-200/80">
         <span className="text-xs font-bold text-slate-700">期間絞り込み</span>
@@ -60,7 +60,7 @@ export function TableView({ events, sessions, demands, applications, onSelectEve
                 <th className="py-2.5 px-3 whitespace-nowrap font-bold">イベント名</th>
                 <th className="py-2.5 px-3 whitespace-nowrap font-bold">公演枠</th>
                 <th className="py-2.5 px-3 whitespace-nowrap font-bold">希望人数</th>
-                <th className="py-2.5 px-3 whitespace-nowrap font-bold">申込・当落結果</th>
+                <th className="py-2.5 px-3 whitespace-nowrap font-bold">申込状況</th>
                 <th className="py-2.5 px-3 whitespace-nowrap font-bold text-right">単価</th>
               </tr>
             </thead>
@@ -90,7 +90,7 @@ export function TableView({ events, sessions, demands, applications, onSelectEve
                         {ev.title}
                       </td>
 
-                      {/* 公演枠名一覧 */}
+                      {/* 公演枠一覧 */}
                       <td className="py-3 px-3 whitespace-nowrap align-top">
                         <div className="flex flex-col gap-1.5">
                           {evSessions.map((s) => (
@@ -101,7 +101,7 @@ export function TableView({ events, sessions, demands, applications, onSelectEve
                         </div>
                       </td>
 
-                      {/* 公演枠ごとの希望数 */}
+                      {/* 希望人数 */}
                       <td className="py-3 px-3 whitespace-nowrap align-top">
                         <div className="flex flex-col gap-1.5">
                           {evSessions.map((s) => {
@@ -115,7 +115,7 @@ export function TableView({ events, sessions, demands, applications, onSelectEve
                         </div>
                       </td>
 
-                      {/* 公演枠ごとの申込結果 */}
+                      {/* 申込状況 */}
                       <td className="py-3 px-3 whitespace-nowrap align-top">
                         <div className="flex flex-col gap-1.5">
                           {evSessions.map((s) => {
@@ -128,13 +128,13 @@ export function TableView({ events, sessions, demands, applications, onSelectEve
 
                             return (
                               <div key={s.id} className="flex items-center gap-1 text-[11px]">
-                                <span className={`font-bold px-1.5 py-0.2 rounded text-[10px] ${
+                                <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${
                                   won > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-400'
                                 }`}>
                                   当選 {won}枚
                                 </span>
                                 {pending > 0 && (
-                                  <span className="bg-amber-50 text-amber-700 font-semibold px-1.5 py-0.2 rounded text-[10px]">
+                                  <span className="bg-amber-50 text-amber-700 font-semibold px-1.5 py-0.5 rounded text-[10px]">
                                     待機 {pending}枚
                                   </span>
                                 )}

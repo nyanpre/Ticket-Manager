@@ -22,7 +22,7 @@ export function EventSessionSection({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-800">公演枠別の需給照合</span>
+        <span className="text-xs font-bold text-slate-800">チケット照合</span>
         <span className="text-[10px] text-slate-400">希望 vs 当選枚数</span>
       </div>
 
