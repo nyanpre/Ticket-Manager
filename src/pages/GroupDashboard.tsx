@@ -12,6 +12,7 @@ import { EventDetailModal } from '../components/EventDetailModal';
 import { MyPageModal } from '../components/MyPageModal';
 import { SettlementModal } from '../components/SettlementModal';
 import { ActivityModal } from '../components/ActivityModal';
+import { ProfileModal } from '../components/ProfileModal';
 import { saveJoinedGroupId } from '../utils/storage';
 
 export function GroupDashboard() {
@@ -23,16 +24,23 @@ export function GroupDashboard() {
   const [sessions, setSessions] = useState<EventSession[]>([]);
   const [demands, setDemands] = useState<MemberDemand[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   const [showEventModal, setShowEventModal] = useState(false);
   const [showMyPage, setShowMyPage] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSettlement, setShowSettlement] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'table'>('list');
 
-  // 過去イベントの展開状態フラグ
   const [showAllPastEvents, setShowAllPastEvents] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setCurrentUser(user);
+    });
+  }, []);
 
   useEffect(() => {
     const paramEventId = searchParams.get('eventId');
@@ -44,12 +52,10 @@ export function GroupDashboard() {
   useEffect(() => {
     if (groupId) {
       saveJoinedGroupId(groupId);
-      // 初回ロード（キャッシュがあれば優先利用）
       fetchGroupData(false);
     }
   }, [groupId]);
 
-  // forceRefresh: 編集・追加時は true でキャッシュを破棄して最新取得
   const fetchGroupData = async (forceRefresh = false) => {
     if (!groupId) return;
 
@@ -59,7 +65,6 @@ export function GroupDashboard() {
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
-          // キャッシュの有効期限を5分間に設定
           if (Date.now() - parsed.timestamp < 5 * 60 * 1000) {
             setGroup(parsed.group);
             setMembers(parsed.members);
@@ -107,7 +112,6 @@ export function GroupDashboard() {
     setDemands(demData);
     setApplications(appData);
 
-    // sessionStorage に保存して次回不要なリクエストを抑制
     sessionStorage.setItem(
       cacheKey,
       JSON.stringify({
@@ -122,7 +126,14 @@ export function GroupDashboard() {
     );
   };
 
-  // 50件超過時の過去イベント自動折りたたみロジック
+  const handleProfileUpdated = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      setCurrentUser(user);
+    }
+    fetchGroupData(true);
+  };
+
   const { upcomingEvents, visiblePastEvents, hiddenPastEventsCount, shouldFold } = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     const upcoming: EventItem[] = [];
@@ -139,7 +150,6 @@ export function GroupDashboard() {
     const isLargeList = events.length > 50;
 
     if (isLargeList && !showAllPastEvents) {
-      // 50件超で「もっと見る」未押下時は直近の過去イベント10件のみ表示
       const visiblePast = past.slice(-10);
       return {
         upcomingEvents: upcoming,
@@ -166,6 +176,7 @@ export function GroupDashboard() {
           group={group}
           members={members}
           onOpenMyPage={() => setShowMyPage(true)}
+          onOpenProfile={() => setShowProfileModal(true)}
           onOpenSettlement={() => setShowSettlement(true)}
           onOpenActivity={() => setShowActivity(true)}
           onMemberUpdated={() => fetchGroupData(true)}
@@ -222,7 +233,6 @@ export function GroupDashboard() {
             </div>
           ) : (
             <div className="space-y-4">
-              {/* 過去イベント（50件超過時は折りたたみ表示） */}
               {visiblePastEvents.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between px-1">
@@ -262,7 +272,6 @@ export function GroupDashboard() {
                 </div>
               )}
 
-              {/* 今後開催予定のイベント */}
               <div className="space-y-2">
                 <span className="text-[11px] font-bold text-indigo-600 px-1">今後のイベント予定</span>
                 <div className="space-y-2.5">
@@ -326,6 +335,7 @@ export function GroupDashboard() {
         />
       )}
 
+      {/* 精算状況・自分のチケット確認モーダル */}
       <MyPageModal
         isOpen={showMyPage}
         onClose={() => setShowMyPage(false)}
@@ -333,6 +343,14 @@ export function GroupDashboard() {
         demands={demands}
         applications={applications}
         onSelectEvent={(eventId) => setSelectedEventId(eventId)}
+      />
+
+      {/* 名前変更専用モーダル */}
+      <ProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        currentUser={currentUser}
+        onProfileUpdated={handleProfileUpdated}
       />
 
       <SettlementModal
@@ -357,3 +375,5 @@ export function GroupDashboard() {
     </div>
   );
 }
+
+export default GroupDashboard;

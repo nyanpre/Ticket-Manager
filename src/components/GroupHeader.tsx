@@ -12,7 +12,8 @@ import {
   Users,
   ShieldCheck,
   UserPlus,
-  X
+  X,
+  Pencil
 } from 'lucide-react';
 import { supabase, getOrCreateAnonymousUser } from '../lib/supabase';
 import type { Group, GroupMember } from '../types/index';
@@ -22,6 +23,7 @@ interface Props {
   group: Group;
   members: GroupMember[];
   onOpenMyPage?: () => void;
+  onOpenProfile?: () => void;
   onOpenSettlement?: () => void;
   onOpenActivity?: () => void;
   onMemberUpdated?: () => void;
@@ -31,6 +33,7 @@ export function GroupHeader({
   group,
   members,
   onOpenMyPage,
+  onOpenProfile,
   onOpenSettlement,
   onOpenActivity,
   onMemberUpdated,
@@ -50,11 +53,19 @@ export function GroupHeader({
   const navigate = useNavigate();
 
   useEffect(() => {
-    getOrCreateAnonymousUser().then((user) => {
-      if (!user) return;
-      setCurrentUserId(user.id);
-      const currentMember = members.find((m) => m.user_id === user.id);
-      setIsAdmin(currentMember?.role === 'admin');
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setCurrentUserId(user.id);
+        const currentMember = members.find((m) => m.user_id === user.id);
+        setIsAdmin(currentMember?.role === 'admin');
+      } else {
+        getOrCreateAnonymousUser().then((anonUser) => {
+          if (!anonUser) return;
+          setCurrentUserId(anonUser.id);
+          const currentMember = members.find((m) => m.user_id === anonUser.id);
+          setIsAdmin(currentMember?.role === 'admin');
+        });
+      }
     });
   }, [members]);
 
@@ -95,7 +106,6 @@ export function GroupHeader({
     }
   };
 
-  // ゲストユーザー作成処理
   const handleAddGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!guestName.trim()) return;
@@ -126,12 +136,10 @@ export function GroupHeader({
     }
   };
 
-  // メンバー / ゲストの削除処理
   const handleRemoveMember = async (member: GroupMember) => {
     const isGuest = member.is_guest || member.user_id.startsWith('guest_');
     const isSelf = member.user_id === currentUserId;
 
-    // 削除可否の確認メッセージ
     const message = isGuest
       ? `ゲスト「${member.display_name}」を削除しますか？`
       : isSelf
@@ -144,7 +152,6 @@ export function GroupHeader({
       const { error } = await supabase.from('group_members').delete().eq('id', member.id);
       if (error) throw error;
 
-      // 自分が退出した場合は一覧へ戻る
       if (isSelf) {
         removeJoinedGroupId(group.id);
         navigate('/', { replace: true });
@@ -303,15 +310,30 @@ export function GroupHeader({
           </form>
         )}
 
+        {/* メンバータグ一覧 */}
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
           {members.map((m) => {
             const isGuest = m.is_guest || m.user_id.startsWith('guest_');
             const isSelf = m.user_id === currentUserId;
-            
-            // 削除権限判定:
-            // 1. ゲストなら誰でも削除可能
-            // 2. 通常メンバーなら「管理者」または「本人」のみ削除可能（管理者の自己削除は不可）
             const canDelete = isGuest || (isAdmin && m.role !== 'admin') || (isSelf && m.role !== 'admin');
+
+            // 自分のバッジをクリックした時だけ名前設定モーダルを開く
+            if (isSelf) {
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={onOpenProfile}
+                  title="クリックして名前を変更"
+                  className="group whitespace-nowrap inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] rounded-lg font-bold border transition cursor-pointer active:scale-95 bg-amber-50 hover:bg-amber-100/80 border-amber-300 text-amber-900 shadow-xs"
+                >
+                  <span>
+                    {m.display_name} {m.role === 'admin' ? '(主)' : '(自分)'}
+                  </span>
+                  <Pencil className="w-2.5 h-2.5 text-amber-700 opacity-70 group-hover:opacity-100" />
+                </button>
+              );
+            }
 
             return (
               <span
@@ -325,14 +347,14 @@ export function GroupHeader({
                 }`}
               >
                 <span>
-                  {m.display_name} {m.role === 'admin' ? '(主)' : isGuest ? '(ゲスト)' : isSelf ? '(自分)' : ''}
+                  {m.display_name} {m.role === 'admin' ? '(主)' : isGuest ? '(ゲスト)' : ''}
                 </span>
 
                 {canDelete && (
                   <button
                     type="button"
                     onClick={() => handleRemoveMember(m)}
-                    title={isGuest ? 'ゲストを削除' : isSelf ? 'グループを脱退' : 'メンバーを削除'}
+                    title={isGuest ? 'ゲストを削除' : 'メンバーを削除'}
                     className="p-0.5 hover:bg-slate-200 active:bg-rose-100 text-slate-400 hover:text-rose-600 rounded-md transition"
                   >
                     <X className="w-3 h-3" />
@@ -346,3 +368,5 @@ export function GroupHeader({
     </div>
   );
 }
+
+export default GroupHeader;
