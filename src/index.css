@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* iOS / Android セーフエリア対応 */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 16px);
+}
