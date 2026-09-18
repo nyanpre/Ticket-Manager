@@ -46,20 +46,50 @@ export function MyPageModal({
     const myDemands = demands.filter((d) => d.user_id === uid);
 
     let toReceive = 0;
-    wonApps.forEach((app) => {
-      const ev = events.find((e) => e.id === app.event_id);
-      if (ev) {
-        toReceive += (ev.ticket_price * app.ticket_count) + ev.system_fee + (ev.ticketing_fee * app.ticket_count);
-      }
-    });
-
     let toPay = 0;
-    myDemands.forEach((dem) => {
-      const ev = events.find((e) => e.id === dem.event_id);
-      const sessionWon = applications.some((a) => a.session_id === dem.session_id && a.status === 'won');
-      if (ev && sessionWon) {
-        toPay += ev.ticket_price + ev.ticketing_fee + Math.floor(ev.system_fee / 2);
-      }
+
+    // 1. 各イベント・セッションごとに「自己相殺」を考慮して計算
+    events.forEach((ev) => {
+      // 当該イベントにおける自分の当選申込
+      const myWonInEvent = wonApps.filter((a) => a.event_id === ev.id);
+      // 当該イベントにおける自分の参加希望
+      const myDemandsInEvent = myDemands.filter((d) => d.event_id === ev.id);
+
+      // イベント全体の当選申込（他人が当選させた枠を自分が使うケース用）
+      const allWonInEvent = applications.filter((a) => a.event_id === ev.id && a.status === 'won');
+
+      // (A) 自名義当選枠の回収額計算
+      myWonInEvent.forEach((app) => {
+        const totalPaidForApp = (ev.ticket_price * app.ticket_count) + ev.system_fee + (ev.ticketing_fee * app.ticket_count);
+        
+        // 自分がこのセッションに参加希望を出しているか？
+        const iAmAttending = myDemandsInEvent.some((d) => d.session_id === app.session_id);
+
+        if (iAmAttending) {
+          // 自参加の場合: 自分の1枚分（チケット代 + 発券手数料 + 手数料按分）は相殺して「要回収」から除外
+          const myOwnShare = ev.ticket_price + ev.ticketing_fee + Math.floor(ev.system_fee / (app.ticket_count || 1));
+          toReceive += Math.max(0, totalPaidForApp - myOwnShare);
+        } else {
+          // 自分は不参加（他人に全額立て替えただけ）: 全額を要回収に計上
+          toReceive += totalPaidForApp;
+        }
+      });
+
+      // (B) 自分の参加希望枠に対する支払額計算
+      myDemandsInEvent.forEach((dem) => {
+        // このセッションで誰かが当選しているか？
+        const wonApp = allWonInEvent.find((a) => a.session_id === dem.session_id);
+        if (!wonApp) return;
+
+        // ★ 自名義で当選したセッションであれば、(A)で既に1枚分自己相殺しているので支払い不要 (toPayに加算しない)
+        const isMyOwnWonSession = myWonInEvent.some((a) => a.session_id === dem.session_id);
+        if (isMyOwnWonSession) {
+          return;
+        }
+
+        // 他人が立て替えてくれたセッションの場合のみ、支払義務として計上
+        toPay += ev.ticket_price + ev.ticketing_fee + Math.floor(ev.system_fee / (wonApp.ticket_count || 2));
+      });
     });
 
     return {
@@ -84,12 +114,17 @@ export function MyPageModal({
         return myAppsInEv.length > 0 || myDemandsInEv.length > 0;
       }
       if (filter === 'receive') {
+        // 立て替え回収額が存在するイベントのみ
         return myAppsInEv.some((a) => a.status === 'won');
       }
       if (filter === 'pay') {
-        return myDemandsInEv.some((dem) =>
-          applications.some((a) => a.session_id === dem.session_id && a.status === 'won')
-        );
+        // 他人名義で当選しており、自分が支払うべきイベント
+        return myDemandsInEv.some((dem) => {
+          const wonByOthers = applications.some(
+            (a) => a.session_id === dem.session_id && a.status === 'won' && a.applicant_user_id !== currentUser.id
+          );
+          return wonByOthers;
+        });
       }
       if (filter === 'won') {
         return myAppsInEv.some((a) => a.status === 'won');
@@ -111,7 +146,7 @@ export function MyPageModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto font-['Noto_Sans_JP']"
     >
       <div className="bg-white rounded-3xl w-full max-w-md max-h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         <div className="p-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
@@ -148,7 +183,7 @@ export function MyPageModal({
               <div className="text-lg font-black text-emerald-800">
                 ¥{summary.toReceive.toLocaleString()}
               </div>
-              <p className="text-[10px] text-emerald-600/80 leading-tight">自分が当選した総立替額</p>
+              <p className="text-[10px] text-emerald-600/80 leading-tight">他人のために立て替えている金額</p>
             </button>
 
             <button
@@ -167,7 +202,7 @@ export function MyPageModal({
               <div className="text-lg font-black text-rose-800">
                 ¥{summary.toPay.toLocaleString()}
               </div>
-              <p className="text-[10px] text-rose-600/80 leading-tight">参加確定枠の支払予定</p>
+              <p className="text-[10px] text-rose-600/80 leading-tight">他人に支払うべきチケット代</p>
             </button>
           </div>
 
@@ -180,7 +215,7 @@ export function MyPageModal({
                 filter === 'won' ? 'bg-white shadow-xs font-bold' : 'hover:bg-slate-100'
               }`}
             >
-              <span className="text-[10px] text-slate-400 font-bold block">当選</span>
+              <span className="text-[10px] text-slate-400 font-bold block">自名義 当選</span>
               <span className="text-xs font-black text-emerald-600 flex items-center justify-center gap-1 mt-0.5">
                 <CheckCircle2 className="w-3.5 h-3.5" /> {summary.wonCount}枚
               </span>
@@ -193,7 +228,7 @@ export function MyPageModal({
                 filter === 'lost' ? 'bg-white shadow-xs font-bold' : 'hover:bg-slate-100'
               }`}
             >
-              <span className="text-[10px] text-slate-400 font-bold block">落選</span>
+              <span className="text-[10px] text-slate-400 font-bold block">自名義 落選</span>
               <span className="text-xs font-black text-rose-500 flex items-center justify-center gap-1 mt-0.5">
                 <XCircle className="w-3.5 h-3.5" /> {summary.lostCount}枚
               </span>
@@ -206,7 +241,7 @@ export function MyPageModal({
                 filter === 'pending' ? 'bg-white shadow-xs font-bold' : 'hover:bg-slate-100'
               }`}
             >
-              <span className="text-[10px] text-slate-400 font-bold block">待機中</span>
+              <span className="text-[10px] text-slate-400 font-bold block">当落待ち</span>
               <span className="text-xs font-black text-amber-600 flex items-center justify-center gap-1 mt-0.5">
                 <Clock className="w-3.5 h-3.5" /> {summary.pendingCount}枚
               </span>
@@ -217,8 +252,8 @@ export function MyPageModal({
           <div className="space-y-2 pt-2 border-t border-slate-100">
             <div className="flex items-center justify-between px-0.5">
               <span className="text-xs font-bold text-slate-800">
-                {filter === 'receive' && '立替中のイベント'}
-                {filter === 'pay' && '支払い予定のイベント'}
+                {filter === 'receive' && '他人に立替中のイベント'}
+                {filter === 'pay' && '他人に支払いが必要なイベント'}
                 {filter === 'won' && '自名義が当選したイベント'}
                 {filter === 'lost' && '自名義が落選したイベント'}
                 {filter === 'pending' && '当落待ちのイベント'}
@@ -296,3 +331,5 @@ export function MyPageModal({
     </div>
   );
 }
+
+export default MyPageModal;

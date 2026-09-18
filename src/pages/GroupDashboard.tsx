@@ -183,43 +183,43 @@ export function GroupDashboard() {
         />
 
         {/* コントロールバー */}
-        <div className="flex items-center justify-between px-1">
-          <div className="bg-slate-200/80 p-1 rounded-xl flex items-center gap-0.5">
+        <div className="flex items-center justify-between gap-1.5 px-0.5">
+          <div className="bg-slate-200/80 p-0.5 rounded-xl flex items-center gap-0.5 min-w-0">
             <button
               onClick={() => setViewMode('list')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 ${
                 viewMode === 'list' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              <List className="w-3.5 h-3.5" />
-              リスト
+              <List className="w-3 h-3 shrink-0" />
+              <span>リスト</span>
             </button>
             <button
               onClick={() => setViewMode('calendar')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 ${
                 viewMode === 'calendar' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              <CalendarIcon className="w-3.5 h-3.5" />
-              カレンダー
+              <CalendarIcon className="w-3 h-3 shrink-0" />
+              <span>カレンダー</span>
             </button>
             <button
               onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 ${
                 viewMode === 'table' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              <TableIcon className="w-3.5 h-3.5" />
-              テーブル
+              <TableIcon className="w-3 h-3 shrink-0" />
+              <span>テーブル</span>
             </button>
           </div>
 
           <button
             onClick={() => setShowEventModal(true)}
-            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition"
+            className="flex items-center gap-1 px-2.5 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition shrink-0 whitespace-nowrap"
           >
-            <Plus className="w-3.5 h-3.5" />
-            新規イベント
+            <Plus className="w-3.5 h-3.5 shrink-0" />
+            <span>新規イベント</span>
           </button>
         </div>
 

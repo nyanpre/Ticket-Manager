@@ -36,44 +36,58 @@ export function SettlementModal({ isOpen, onClose, members, events, applications
 
       // 1. 立替者へのプラス加算（チケット単価×枚数 + 申込手数料 + 発券手数料×枚数）
       wonApps.forEach((app) => {
+        const applicantId = app.applicant_user_id;
+        if (!applicantId) return;
         const cost = (ev.ticket_price * app.ticket_count) + ev.system_fee + (ev.ticketing_fee * app.ticket_count);
-        balanceMap[app.applicant_user_id] = (balanceMap[app.applicant_user_id] || 0) + cost;
+        balanceMap[applicantId] = (balanceMap[applicantId] || 0) + cost;
       });
 
-      // 2. 枠ごとの参加者へのマイナス負担減算
+      // 2. セッションごとに参加者へ負担を按分（合計が立替総額と完全に一致するよう端数を調整）
       const sessionsInEvent = Array.from(new Set(wonApps.map((a) => a.session_id)));
 
       sessionsInEvent.forEach((sessId) => {
         const sessApps = wonApps.filter((a) => a.session_id === sessId);
-        const wonCount = sessApps.reduce((sum, a) => sum + a.ticket_count, 0);
-
         const sessDemands = demands.filter((d) => d.event_id === ev.id && d.session_id === sessId);
         if (sessDemands.length === 0) return;
 
+        // 当該セッションの総コスト
         const sessTotalCost = sessApps.reduce(
           (sum, a) => sum + (ev.ticket_price * a.ticket_count) + ev.system_fee + (ev.ticketing_fee * a.ticket_count),
           0
         );
 
-        const perPersonCost = Math.round(sessTotalCost / (sessDemands.length || wonCount || 1));
+        const participantCount = sessDemands.length;
+        const baseCost = Math.floor(sessTotalCost / participantCount);
+        let remainder = sessTotalCost % participantCount;
 
+        // 参加者から按分負担をマイナス減算（端数も漏れなく按分して全員の合計を±0に維持）
         sessDemands.forEach((dem) => {
-          balanceMap[dem.user_id] = (balanceMap[dem.user_id] || 0) - perPersonCost;
+          const cost = baseCost + (remainder > 0 ? 1 : 0);
+          if (remainder > 0) remainder--;
+          balanceMap[dem.user_id] = (balanceMap[dem.user_id] || 0) - cost;
         });
       });
     });
 
-    // 各人の純残高一覧
+    // 各人の純残高一覧（四捨五入して整数化）
     const balances = members.map((m) => ({
       userId: m.user_id,
       name: m.display_name,
       isGuest: m.is_guest || m.user_id.startsWith('guest_'),
-      amount: balanceMap[m.user_id] || 0,
+      amount: Math.round(balanceMap[m.user_id] || 0),
     }));
 
-    // 送金指示の最小化アルゴリズム
-    const debtors = balances.filter((b) => b.amount < -1).map((b) => ({ ...b, amount: -b.amount }));
-    const creditors = balances.filter((b) => b.amount > 1).map((b) => ({ ...b }));
+    // 送金指示の最小化アルゴリズム（純残高の貪欲法相殺）
+    // 支払う側（マイナス）と受け取る側（プラス）に分類
+    const debtors = balances
+      .filter((b) => b.amount < 0)
+      .map((b) => ({ userId: b.userId, amount: -b.amount }))
+      .sort((a, b) => b.amount - a.amount); // 金額が大きい順
+
+    const creditors = balances
+      .filter((b) => b.amount > 0)
+      .map((b) => ({ userId: b.userId, amount: b.amount }))
+      .sort((a, b) => b.amount - a.amount); // 金額が大きい順
 
     const transfers: TransferInstruction[] = [];
     let dIdx = 0;
@@ -95,8 +109,8 @@ export function SettlementModal({ isOpen, onClose, members, events, applications
       debtor.amount -= settleAmount;
       creditor.amount -= settleAmount;
 
-      if (debtor.amount <= 1) dIdx++;
-      if (creditor.amount <= 1) cIdx++;
+      if (debtor.amount === 0) dIdx++;
+      if (creditor.amount === 0) cIdx++;
     }
 
     return { balances, transfers };
@@ -120,7 +134,7 @@ export function SettlementModal({ isOpen, onClose, members, events, applications
             </div>
             <div>
               <h2 className="text-sm font-bold text-slate-800">全イベント精算まとめ</h2>
-              <p className="text-[10px] text-slate-400">相殺後の最短送金ルート</p>
+              <p className="text-[10px] text-slate-400">相殺後の最短送金ルート（最小送金回数）</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full">
@@ -213,3 +227,5 @@ export function SettlementModal({ isOpen, onClose, members, events, applications
     </div>
   );
 }
+
+export default SettlementModal;

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X } from 'lucide-react';
+import { X, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import type { EventSession, Application, MemberDemand, GroupMember } from '../../types/index';
 
 interface Props {
@@ -59,7 +59,7 @@ export function EventSessionSection({
               {/* 自分の参加希望トグル */}
               <button
                 onClick={() => onToggleDemand(sess.id, currentUserId)}
-                className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
+                className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer active:scale-95 ${
                   isMyDemand ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-600'
                 }`}
               >
@@ -93,7 +93,7 @@ export function EventSessionSection({
                     onToggleDemand(sess.id, selectedGuestMap[sess.id]);
                     setSelectedGuestMap({ ...selectedGuestMap, [sess.id]: '' });
                   }}
-                  className="px-2 py-1 bg-indigo-50 active:bg-indigo-100 text-indigo-600 font-bold rounded-lg text-[10px] disabled:opacity-40"
+                  className="px-2 py-1 bg-indigo-50 active:bg-indigo-100 text-indigo-600 font-bold rounded-lg text-[10px] disabled:opacity-40 cursor-pointer"
                 >
                   反映
                 </button>
@@ -127,18 +127,57 @@ export function EventSessionSection({
                     const member = members.find((m) => m.user_id === d.user_id);
                     const isGuest = member?.is_guest || member?.user_id.startsWith('guest_');
 
+                    // 該当メンバーの申込状況を取得
+                    const userApps = sessionApps.filter(
+                      (a) => a.applicant_user_id === d.user_id
+                    );
+
+                    // ステータス判定（当選 > 待機 > 落選 > 未提出）
+                    let statusType: 'won' | 'pending' | 'lost' | 'unsubmitted' = 'unsubmitted';
+                    if (userApps.length > 0) {
+                      if (userApps.some((a) => a.status === 'won')) {
+                        statusType = 'won';
+                      } else if (userApps.some((a) => a.status === 'pending')) {
+                        statusType = 'pending';
+                      } else if (userApps.some((a) => a.status === 'lost')) {
+                        statusType = 'lost';
+                      }
+                    }
+
+                    // バッジスタイルとアイコンの決定
+                    let badgeClass = 'bg-slate-100 text-slate-400 border-slate-200'; // 未提出（灰色）
+                    let statusLabel = '未提出';
+                    let StatusIcon = null;
+
+                    if (statusType === 'won') {
+                      badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-300 font-bold';
+                      statusLabel = '当選';
+                      StatusIcon = <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />;
+                    } else if (statusType === 'pending') {
+                      badgeClass = 'bg-amber-50 text-amber-700 border-amber-300 font-semibold';
+                      statusLabel = '待機';
+                      StatusIcon = <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />;
+                    } else if (statusType === 'lost') {
+                      badgeClass = 'bg-rose-50 text-rose-700 border-rose-300';
+                      statusLabel = '落選';
+                      StatusIcon = <XCircle className="w-2.5 h-2.5 text-rose-500 shrink-0" />;
+                    }
+
                     return (
                       <span
                         key={d.id}
-                        className="inline-flex items-center gap-1 text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-medium"
+                        className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md border transition ${badgeClass}`}
+                        title={`${getMemberName(d.user_id)}: ${statusLabel}`}
                       >
+                        {StatusIcon}
                         <span>{getMemberName(d.user_id)}</span>
+
                         {/* ゲスト希望削除ボタン */}
                         {isGuest && (
                           <button
                             type="button"
                             onClick={() => onToggleDemand(sess.id, d.user_id)}
-                            className="text-slate-400 hover:text-rose-500"
+                            className="text-slate-400 hover:text-rose-500 ml-0.5"
                           >
                             <X className="w-2.5 h-2.5" />
                           </button>
@@ -155,3 +194,5 @@ export function EventSessionSection({
     </div>
   );
 }
+
+export default EventSessionSection;

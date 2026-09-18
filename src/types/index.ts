@@ -44,7 +44,7 @@ export interface Application {
   ticket_count: number;
   status: 'pending' | 'won' | 'lost';
   is_paid?: boolean;
-  payment_method?: string | null; // ★ここを追加
+  payment_method?: string | null;
   created_at: string;
 }
 
@@ -54,4 +54,14 @@ export interface MemberDemand {
   user_id: string;
   session_id: string;
   created_at: string;
+}
+
+export interface EventPayment {
+  id: string;
+  event_id: string;
+  from_user_id: string;
+  to_user_id: string;
+  amount: number;
+  is_paid: boolean;
+  updated_at?: string;
 }
