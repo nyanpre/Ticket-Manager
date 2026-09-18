@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { User, CheckCircle2, Clock, Calendar, ArrowUpRight, ArrowDownLeft, X, ChevronRight, XCircle } from 'lucide-react';
-import { getOrCreateAnonymousUser } from '../lib/supabase';
-import type { EventItem, Application, MemberDemand } from '../types';
+import { supabase } from '../lib/supabase';
+import type { EventItem, Application, MemberDemand, GroupMember } from '../types';
 import { formatDateSlash } from './CalendarView';
+import { calculateEventSettlement } from '../utils/settlement';
 
 interface Props {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface Props {
   events: EventItem[];
   demands: MemberDemand[];
   applications: Application[];
+  members?: GroupMember[];
   onSelectEvent: (eventId: string) => void;
 }
 
@@ -21,6 +23,7 @@ export function MyPageModal({
   events,
   demands,
   applications,
+  members = [],
   onSelectEvent,
 }: Props) {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -28,7 +31,10 @@ export function MyPageModal({
 
   useEffect(() => {
     if (isOpen) {
-      getOrCreateAnonymousUser().then(setCurrentUser);
+      // ログイン中の正規ユーザーを取得（匿名ユーザー作成の競合を防止）
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        setCurrentUser(user);
+      });
       setFilter('all');
     }
   }, [isOpen]);
@@ -39,72 +45,45 @@ export function MyPageModal({
     }
 
     const uid = currentUser.id;
+
+    // 自名義の申込・希望
     const myApps = applications.filter((a) => a.applicant_user_id === uid);
     const wonApps = myApps.filter((a) => a.status === 'won');
     const lostApps = myApps.filter((a) => a.status === 'lost');
     const pendingApps = myApps.filter((a) => a.status === 'pending');
     const myDemands = demands.filter((d) => d.user_id === uid);
 
-    let toReceive = 0;
-    let toPay = 0;
+    let totalReceive = 0;
+    let totalPay = 0;
 
-    // 1. 各イベント・セッションごとに「自己相殺」を考慮して計算
+    // 全イベント精算まとめ（SettlementModal）と全く同一の算出ロジックで集計
+    // 自名義当選かつ自参加の枠は自己相殺され、他の人との差額のみが算出されます
     events.forEach((ev) => {
-      // 当該イベントにおける自分の当選申込
-      const myWonInEvent = wonApps.filter((a) => a.event_id === ev.id);
-      // 当該イベントにおける自分の参加希望
-      const myDemandsInEvent = myDemands.filter((d) => d.event_id === ev.id);
-
-      // イベント全体の当選申込（他人が当選させた枠を自分が使うケース用）
-      const allWonInEvent = applications.filter((a) => a.event_id === ev.id && a.status === 'won');
-
-      // (A) 自名義当選枠の回収額計算
-      myWonInEvent.forEach((app) => {
-        const totalPaidForApp = (ev.ticket_price * app.ticket_count) + ev.system_fee + (ev.ticketing_fee * app.ticket_count);
-        
-        // 自分がこのセッションに参加希望を出しているか？
-        const iAmAttending = myDemandsInEvent.some((d) => d.session_id === app.session_id);
-
-        if (iAmAttending) {
-          // 自参加の場合: 自分の1枚分（チケット代 + 発券手数料 + 手数料按分）は相殺して「要回収」から除外
-          const myOwnShare = ev.ticket_price + ev.ticketing_fee + Math.floor(ev.system_fee / (app.ticket_count || 1));
-          toReceive += Math.max(0, totalPaidForApp - myOwnShare);
-        } else {
-          // 自分は不参加（他人に全額立て替えただけ）: 全額を要回収に計上
-          toReceive += totalPaidForApp;
+      const { transfers } = calculateEventSettlement(ev, applications, demands, members);
+      transfers.forEach((t) => {
+        if (t.toUserId === uid) {
+          totalReceive += t.amount;
         }
-      });
-
-      // (B) 自分の参加希望枠に対する支払額計算
-      myDemandsInEvent.forEach((dem) => {
-        // このセッションで誰かが当選しているか？
-        const wonApp = allWonInEvent.find((a) => a.session_id === dem.session_id);
-        if (!wonApp) return;
-
-        // ★ 自名義で当選したセッションであれば、(A)で既に1枚分自己相殺しているので支払い不要 (toPayに加算しない)
-        const isMyOwnWonSession = myWonInEvent.some((a) => a.session_id === dem.session_id);
-        if (isMyOwnWonSession) {
-          return;
+        if (t.fromUserId === uid) {
+          totalPay += t.amount;
         }
-
-        // 他人が立て替えてくれたセッションの場合のみ、支払義務として計上
-        toPay += ev.ticket_price + ev.ticketing_fee + Math.floor(ev.system_fee / (wonApp.ticket_count || 2));
       });
     });
 
     return {
-      toPay,
-      toReceive,
+      toPay: totalPay,
+      toReceive: totalReceive,
       wonCount: wonApps.reduce((acc, a) => acc + a.ticket_count, 0),
       lostCount: lostApps.reduce((acc, a) => acc + a.ticket_count, 0),
       pendingCount: pendingApps.reduce((acc, a) => acc + a.ticket_count, 0),
       myApps,
       myDemands,
     };
-  }, [currentUser, applications, demands, events]);
+  }, [currentUser, applications, demands, events, members]);
 
   const displayedEvents = useMemo(() => {
     if (!currentUser) return [];
+    const uid = currentUser.id;
 
     return events.filter((ev) => {
       const myAppsInEv = summary.myApps.filter((a) => a.event_id === ev.id);
@@ -114,17 +93,12 @@ export function MyPageModal({
         return myAppsInEv.length > 0 || myDemandsInEv.length > 0;
       }
       if (filter === 'receive') {
-        // 立て替え回収額が存在するイベントのみ
-        return myAppsInEv.some((a) => a.status === 'won');
+        const { transfers } = calculateEventSettlement(ev, applications, demands, members);
+        return transfers.some((t) => t.toUserId === uid);
       }
       if (filter === 'pay') {
-        // 他人名義で当選しており、自分が支払うべきイベント
-        return myDemandsInEv.some((dem) => {
-          const wonByOthers = applications.some(
-            (a) => a.session_id === dem.session_id && a.status === 'won' && a.applicant_user_id !== currentUser.id
-          );
-          return wonByOthers;
-        });
+        const { transfers } = calculateEventSettlement(ev, applications, demands, members);
+        return transfers.some((t) => t.fromUserId === uid);
       }
       if (filter === 'won') {
         return myAppsInEv.some((a) => a.status === 'won');
@@ -137,7 +111,7 @@ export function MyPageModal({
       }
       return false;
     });
-  }, [events, filter, summary, currentUser, applications]);
+  }, [events, filter, summary, currentUser, applications, demands, members]);
 
   if (!isOpen) return null;
 
@@ -159,7 +133,7 @@ export function MyPageModal({
               <p className="text-[10px] text-slate-400">カードをタップすると一覧を絞り込めます</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full">
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -170,7 +144,7 @@ export function MyPageModal({
             <button
               type="button"
               onClick={() => setFilter(filter === 'receive' ? 'all' : 'receive')}
-              className={`text-left rounded-2xl p-3.5 space-y-1 transition border ${
+              className={`text-left rounded-2xl p-3.5 space-y-1 transition border cursor-pointer ${
                 filter === 'receive'
                   ? 'bg-emerald-100 border-emerald-400 ring-2 ring-emerald-300'
                   : 'bg-emerald-50/70 border-emerald-100 hover:bg-emerald-50'
@@ -183,13 +157,13 @@ export function MyPageModal({
               <div className="text-lg font-black text-emerald-800">
                 ¥{summary.toReceive.toLocaleString()}
               </div>
-              <p className="text-[10px] text-emerald-600/80 leading-tight">他人のために立て替えている金額</p>
+              <p className="text-[10px] text-emerald-600/80 leading-tight">相殺後に受け取る予定の金額</p>
             </button>
 
             <button
               type="button"
               onClick={() => setFilter(filter === 'pay' ? 'all' : 'pay')}
-              className={`text-left rounded-2xl p-3.5 space-y-1 transition border ${
+              className={`text-left rounded-2xl p-3.5 space-y-1 transition border cursor-pointer ${
                 filter === 'pay'
                   ? 'bg-rose-100 border-rose-400 ring-2 ring-rose-300'
                   : 'bg-rose-50/70 border-rose-100 hover:bg-rose-50'
@@ -202,7 +176,7 @@ export function MyPageModal({
               <div className="text-lg font-black text-rose-800">
                 ¥{summary.toPay.toLocaleString()}
               </div>
-              <p className="text-[10px] text-rose-600/80 leading-tight">他人に支払うべきチケット代</p>
+              <p className="text-[10px] text-rose-600/80 leading-tight">立替者に支払うべきチケット代</p>
             </button>
           </div>
 
@@ -211,7 +185,7 @@ export function MyPageModal({
             <button
               type="button"
               onClick={() => setFilter(filter === 'won' ? 'all' : 'won')}
-              className={`flex-1 py-1.5 rounded-xl transition ${
+              className={`flex-1 py-1.5 rounded-xl transition cursor-pointer ${
                 filter === 'won' ? 'bg-white shadow-xs font-bold' : 'hover:bg-slate-100'
               }`}
             >
@@ -224,7 +198,7 @@ export function MyPageModal({
             <button
               type="button"
               onClick={() => setFilter(filter === 'lost' ? 'all' : 'lost')}
-              className={`flex-1 py-1.5 rounded-xl transition ${
+              className={`flex-1 py-1.5 rounded-xl transition cursor-pointer ${
                 filter === 'lost' ? 'bg-white shadow-xs font-bold' : 'hover:bg-slate-100'
               }`}
             >
@@ -237,7 +211,7 @@ export function MyPageModal({
             <button
               type="button"
               onClick={() => setFilter(filter === 'pending' ? 'all' : 'pending')}
-              className={`flex-1 py-1.5 rounded-xl transition ${
+              className={`flex-1 py-1.5 rounded-xl transition cursor-pointer ${
                 filter === 'pending' ? 'bg-white shadow-xs font-bold' : 'hover:bg-slate-100'
               }`}
             >
@@ -252,8 +226,8 @@ export function MyPageModal({
           <div className="space-y-2 pt-2 border-t border-slate-100">
             <div className="flex items-center justify-between px-0.5">
               <span className="text-xs font-bold text-slate-800">
-                {filter === 'receive' && '他人に立替中のイベント'}
-                {filter === 'pay' && '他人に支払いが必要なイベント'}
+                {filter === 'receive' && '回収予定のイベント'}
+                {filter === 'pay' && '支払いが必要なイベント'}
                 {filter === 'won' && '自名義が当選したイベント'}
                 {filter === 'lost' && '自名義が落選したイベント'}
                 {filter === 'pending' && '当落待ちのイベント'}
@@ -262,7 +236,7 @@ export function MyPageModal({
               {filter !== 'all' && (
                 <button
                   onClick={() => setFilter('all')}
-                  className="text-[11px] text-indigo-600 font-medium"
+                  className="text-[11px] text-indigo-600 font-medium cursor-pointer"
                 >
                   絞り込み解除
                 </button>
@@ -290,7 +264,7 @@ export function MyPageModal({
                     >
                       <div className="space-y-1">
                         <div className="flex items-center gap-1.5 text-indigo-600 font-bold text-[11px]">
-                          <Calendar className="w-3 h-3" />
+                          <Calendar className="w-3.5 h-3.5" />
                           <span>{formatDateSlash(ev.event_date)}</span>
                         </div>
                         <div className="text-xs font-bold text-slate-800">{ev.title}</div>
