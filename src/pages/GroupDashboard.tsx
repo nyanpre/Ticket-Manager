@@ -36,10 +36,19 @@ export function GroupDashboard() {
 
   const [showAllPastEvents, setShowAllPastEvents] = useState(false);
 
+  // 1. ユーザーセッションをローカルキャッシュから即座に取得（HTTP通信ゼロ）
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setCurrentUser(user);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
     });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user ?? null);
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -56,6 +65,33 @@ export function GroupDashboard() {
     }
   }, [groupId]);
 
+  // ログインユーザーが未参加の場合のみ登録を実行（所属済なら通信ゼロ）
+  const ensureUserJoined = async (user: any, currentMembers: GroupMember[]) => {
+    if (!groupId || !user) return;
+    const isJoined = currentMembers.some((m) => m.user_id === user.id);
+    if (isJoined) return;
+
+    const displayName =
+      user.user_metadata?.display_name || user.email?.split('@')[0] || 'メンバー';
+
+    const { data } = await supabase
+      .from('group_members')
+      .insert([
+        {
+          group_id: groupId,
+          user_id: user.id,
+          display_name: displayName,
+          role: 'member',
+        },
+      ])
+      .select('id, group_id, user_id, display_name, role, is_guest, created_at')
+      .single();
+
+    if (data) {
+      setMembers((prev) => [...prev, data]);
+    }
+  };
+
   const fetchGroupData = async (forceRefresh = false) => {
     if (!groupId) return;
 
@@ -65,6 +101,7 @@ export function GroupDashboard() {
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
+          // キャッシュが5分以内の場合は通信を行わずに即時復元
           if (Date.now() - parsed.timestamp < 5 * 60 * 1000) {
             setGroup(parsed.group);
             setMembers(parsed.members);
@@ -80,56 +117,97 @@ export function GroupDashboard() {
       }
     }
 
-    const { data: groupData } = await supabase.from('groups').select('*').eq('id', groupId).single();
-    const { data: membersData } = await supabase.from('group_members').select('*').eq('group_id', groupId);
-    const { data: eventsData } = await supabase
-      .from('events')
-      .select('*')
-      .eq('group_id', groupId)
-      .order('event_date', { ascending: true });
+    // 結合クエリを活用し、グループ情報・メンバー・イベント・関連データを最小の2クエリで取得
+    const [groupRes, eventsRes] = await Promise.all([
+      supabase
+        .from('groups')
+        .select(`
+          id, name, invite_token, created_at,
+          group_members (id, group_id, user_id, display_name, role, is_guest, created_at)
+        `)
+        .eq('id', groupId)
+        .single(),
+      supabase
+        .from('events')
+        .select(`
+          id, group_id, title, event_date, ticket_price, system_fee, ticketing_fee, application_deadline, lottery_result_date, created_at,
+          event_sessions (id, event_id, name, created_at),
+          member_demands (id, event_id, user_id, session_id, created_at),
+          applications (id, event_id, session_id, applicant_user_id, pair_user_id, ticket_count, status, is_paid, payment_method, created_at)
+        `)
+        .eq('group_id', groupId)
+        .order('event_date', { ascending: true }),
+    ]);
 
-    let sessData: EventSession[] = [];
-    let demData: MemberDemand[] = [];
-    let appData: Application[] = [];
+    const groupRaw = groupRes.data;
+    const membersData: GroupMember[] = groupRaw?.group_members || [];
+    const groupData: Group | null = groupRaw
+      ? {
+          id: groupRaw.id,
+          name: groupRaw.name,
+          invite_token: groupRaw.invite_token,
+          created_at: groupRaw.created_at,
+        }
+      : null;
 
-    if (eventsData && eventsData.length > 0) {
-      const eventIds = eventsData.map((e) => e.id);
-      const [sRes, dRes, aRes] = await Promise.all([
-        supabase.from('event_sessions').select('*').in('event_id', eventIds),
-        supabase.from('member_demands').select('*').in('event_id', eventIds),
-        supabase.from('applications').select('*').in('event_id', eventIds),
-      ]);
+    const rawEvents = eventsRes.data || [];
 
-      sessData = sRes.data || [];
-      demData = dRes.data || [];
-      appData = aRes.data || [];
-    }
+    const parsedEvents: EventItem[] = [];
+    const parsedSessions: EventSession[] = [];
+    const parsedDemands: MemberDemand[] = [];
+    const parsedApps: Application[] = [];
+
+    rawEvents.forEach((ev: any) => {
+      if (ev.event_sessions) parsedSessions.push(...ev.event_sessions);
+      if (ev.member_demands) parsedDemands.push(...ev.member_demands);
+      if (ev.applications) parsedApps.push(...ev.applications);
+
+      parsedEvents.push({
+        id: ev.id,
+        group_id: ev.group_id,
+        title: ev.title,
+        event_date: ev.event_date,
+        ticket_price: ev.ticket_price,
+        system_fee: ev.system_fee,
+        ticketing_fee: ev.ticketing_fee,
+        application_deadline: ev.application_deadline,
+        lottery_result_date: ev.lottery_result_date,
+        created_at: ev.created_at,
+      });
+    });
 
     setGroup(groupData);
-    setMembers(membersData || []);
-    setEvents(eventsData || []);
-    setSessions(sessData);
-    setDemands(demData);
-    setApplications(appData);
+    setMembers(membersData);
+    setEvents(parsedEvents);
+    setSessions(parsedSessions);
+    setDemands(parsedDemands);
+    setApplications(parsedApps);
 
+    // キャッシュ保存
     sessionStorage.setItem(
       cacheKey,
       JSON.stringify({
         timestamp: Date.now(),
         group: groupData,
-        members: membersData || [],
-        events: eventsData || [],
-        sessions: sessData,
-        demands: demData,
-        applications: appData,
+        members: membersData,
+        events: parsedEvents,
+        sessions: parsedSessions,
+        demands: parsedDemands,
+        applications: parsedApps,
       })
     );
+
+    // セッションキャッシュからユーザーを取り出して参加確認
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      await ensureUserJoined(session.user, membersData);
+    }
   };
 
   const handleProfileUpdated = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      setCurrentUser(user);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      setCurrentUser(session.user);
     }
     fetchGroupData(true);
   };
@@ -187,7 +265,7 @@ export function GroupDashboard() {
           <div className="bg-slate-200/80 p-0.5 rounded-xl flex items-center gap-0.5 min-w-0">
             <button
               onClick={() => setViewMode('list')}
-              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 ${
+              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 cursor-pointer ${
                 viewMode === 'list' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
@@ -196,7 +274,7 @@ export function GroupDashboard() {
             </button>
             <button
               onClick={() => setViewMode('calendar')}
-              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 ${
+              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 cursor-pointer ${
                 viewMode === 'calendar' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
@@ -205,7 +283,7 @@ export function GroupDashboard() {
             </button>
             <button
               onClick={() => setViewMode('table')}
-              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 ${
+              className={`flex items-center gap-0.5 px-1.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition shrink-0 cursor-pointer ${
                 viewMode === 'table' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
@@ -216,7 +294,7 @@ export function GroupDashboard() {
 
           <button
             onClick={() => setShowEventModal(true)}
-            className="flex items-center gap-1 px-2.5 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition shrink-0 whitespace-nowrap"
+            className="flex items-center gap-1 px-2.5 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition shrink-0 whitespace-nowrap cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5 shrink-0" />
             <span>新規イベント</span>
@@ -240,7 +318,7 @@ export function GroupDashboard() {
                     {shouldFold && hiddenPastEventsCount > 0 && (
                       <button
                         onClick={() => setShowAllPastEvents(true)}
-                        className="text-[11px] font-bold text-indigo-600 flex items-center gap-0.5 hover:text-indigo-700"
+                        className="text-[11px] font-bold text-indigo-600 flex items-center gap-0.5 hover:text-indigo-700 cursor-pointer"
                       >
                         過去のイベントをもっと見る（+{hiddenPastEventsCount}件）
                         <ChevronDown className="w-3 h-3" />
@@ -249,7 +327,7 @@ export function GroupDashboard() {
                     {shouldFold && showAllPastEvents && (
                       <button
                         onClick={() => setShowAllPastEvents(false)}
-                        className="text-[11px] font-bold text-slate-400 flex items-center gap-0.5 hover:text-slate-600"
+                        className="text-[11px] font-bold text-slate-400 flex items-center gap-0.5 hover:text-slate-600 cursor-pointer"
                       >
                         一部を折りたたむ
                         <ChevronUp className="w-3 h-3" />
@@ -332,6 +410,11 @@ export function GroupDashboard() {
           onClose={() => setSelectedEventId(null)}
           onEventUpdated={() => fetchGroupData(true)}
           onEventDeleted={() => fetchGroupData(true)}
+          initialEvent={events.find((e) => e.id === selectedEventId) || null}
+          initialSessions={sessions.filter((s) => s.event_id === selectedEventId)}
+          initialMembers={members}
+          initialDemands={demands.filter((d) => d.event_id === selectedEventId)}
+          initialApplications={applications.filter((a) => a.event_id === selectedEventId)}
         />
       )}
 
@@ -342,10 +425,11 @@ export function GroupDashboard() {
         events={events}
         demands={demands}
         applications={applications}
+        members={members}
         onSelectEvent={(eventId) => setSelectedEventId(eventId)}
       />
 
-      {/* 名前変更専用モーダル */}
+      {/* プロフィール設定モーダル */}
       <ProfileModal
         isOpen={showProfileModal}
         onClose={() => setShowProfileModal(false)}

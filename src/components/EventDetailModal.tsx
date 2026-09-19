@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Calendar, Edit2, X, Share2, Check, Clock, Bell, CircleDollarSign, FileText } from 'lucide-react';
-import { supabase, getOrCreateAnonymousUser } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import type { EventItem, EventSession, Application, MemberDemand, GroupMember } from '../types/index';
 import { formatDateSlash } from './CalendarView';
 import { EventEditForm } from './event-detail/EventEditForm';
@@ -15,6 +15,12 @@ interface Props {
   onClose: () => void;
   onEventUpdated: () => void;
   onEventDeleted?: () => void;
+  // 親コンポーネント（GroupDashboard）が既に持っているデータを引き渡すことで初期通信を0に削減
+  initialEvent?: EventItem | null;
+  initialSessions?: EventSession[];
+  initialMembers?: GroupMember[];
+  initialDemands?: MemberDemand[];
+  initialApplications?: Application[];
 }
 
 export function EventDetailModal({
@@ -24,44 +30,82 @@ export function EventDetailModal({
   onClose,
   onEventUpdated,
   onEventDeleted,
+  initialEvent,
+  initialSessions,
+  initialMembers,
+  initialDemands,
+  initialApplications,
 }: Props) {
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [event, setEvent] = useState<EventItem | null>(null);
-  const [sessions, setSessions] = useState<EventSession[]>([]);
-  const [members, setMembers] = useState<GroupMember[]>([]);
-  const [demands, setDemands] = useState<MemberDemand[]>([]);
-  const [applications, setApplications] = useState<Application[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [event, setEvent] = useState<EventItem | null>(initialEvent || null);
+  const [sessions, setSessions] = useState<EventSession[]>(initialSessions || []);
+  const [members, setMembers] = useState<GroupMember[]>(initialMembers || []);
+  const [demands, setDemands] = useState<MemberDemand[]>(initialDemands || []);
+  const [applications, setApplications] = useState<Application[]>(initialApplications || []);
+  const [loading, setLoading] = useState(!initialEvent);
   const [isEditing, setIsEditing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'payment'>('info');
 
+  // 1. ローカルセッションから即時ユーザー取得（HTTP通信ゼロ）
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+  }, []);
+
+  // 2. モーダルが開かれた時のデータ初期化
   useEffect(() => {
     if (isOpen && eventId) {
-      fetchDetail();
       setActiveTab('info');
+      // 親から既存データが渡されている場合は即時表示（HTTP通信ゼロ）
+      if (initialEvent && initialEvent.id === eventId) {
+        setEvent(initialEvent);
+        if (initialSessions) setSessions(initialSessions.filter((s) => s.event_id === eventId));
+        if (initialMembers) setMembers(initialMembers);
+        if (initialDemands) setDemands(initialDemands.filter((d) => d.event_id === eventId));
+        if (initialApplications) setApplications(initialApplications.filter((a) => a.event_id === eventId));
+        setLoading(false);
+      } else {
+        fetchDetail();
+      }
     }
-  }, [isOpen, eventId]);
+  }, [isOpen, eventId, initialEvent]);
 
+  // 3. データ再フェッチ（更新時または初期データ未保持時）
   const fetchDetail = async () => {
     setLoading(true);
-    const user = await getOrCreateAnonymousUser();
-    setCurrentUser(user);
 
-    const { data: evData } = await supabase.from('events').select('*').eq('id', eventId).single();
-    if (evData) {
-      setEvent(evData);
-      const { data: sData } = await supabase.from('event_sessions').select('*').eq('event_id', eventId);
-      setSessions(sData || []);
+    const [evRes, mRes, sRes, dRes, aRes] = await Promise.all([
+      supabase
+        .from('events')
+        .select('id, group_id, title, event_date, ticket_price, system_fee, ticketing_fee, application_deadline, lottery_result_date, created_at')
+        .eq('id', eventId)
+        .single(),
+      supabase
+        .from('group_members')
+        .select('id, group_id, user_id, display_name, role, is_guest, created_at')
+        .eq('group_id', groupId),
+      supabase
+        .from('event_sessions')
+        .select('id, event_id, name, created_at')
+        .eq('event_id', eventId),
+      supabase
+        .from('member_demands')
+        .select('id, event_id, user_id, session_id, created_at')
+        .eq('event_id', eventId),
+      supabase
+        .from('applications')
+        .select('id, event_id, session_id, applicant_user_id, pair_user_id, ticket_count, status, is_paid, payment_method, created_at')
+        .eq('event_id', eventId),
+    ]);
 
-      const { data: mData } = await supabase.from('group_members').select('*').eq('group_id', evData.group_id);
-      setMembers(mData || []);
-
-      const { data: dData } = await supabase.from('member_demands').select('*').eq('event_id', eventId);
-      setDemands(dData || []);
-
-      const { data: aData } = await supabase.from('applications').select('*').eq('event_id', eventId);
-      setApplications(aData || []);
+    if (evRes.data) {
+      setEvent(evRes.data);
+      setMembers(mRes.data || []);
+      setSessions(sRes.data || []);
+      setDemands(dRes.data || []);
+      setApplications(aRes.data || []);
     }
     setLoading(false);
   };
@@ -91,14 +135,16 @@ export function EventDetailModal({
 
     if (existing) {
       await supabase.from('member_demands').delete().eq('id', existing.id);
-      setDemands(demands.filter((d) => d.id !== existing.id));
+      setDemands((prev) => prev.filter((d) => d.id !== existing.id));
     } else {
       const { data, error } = await supabase
         .from('member_demands')
         .insert([{ event_id: eventId, user_id: uid, session_id: sessionId }])
-        .select()
+        .select('id, event_id, user_id, session_id, created_at')
         .single();
-      if (!error && data) setDemands([...demands, data]);
+      if (!error && data) {
+        setDemands((prev) => [...prev, data]);
+      }
     }
     onEventUpdated();
   };
@@ -129,21 +175,21 @@ export function EventDetailModal({
     const { data, error } = await supabase
       .from('applications')
       .insert([insertPayload])
-      .select()
+      .select('id, event_id, session_id, applicant_user_id, pair_user_id, ticket_count, status, is_paid, payment_method, created_at')
       .single();
 
     if (error) {
       alert(`登録失敗: ${error.message}`);
       return;
     }
-    setApplications([...applications, data]);
+    setApplications((prev) => [...prev, data]);
     onEventUpdated();
   };
 
   const handleStatusChange = async (appId: string, newStatus: 'pending' | 'won' | 'lost') => {
     const { error } = await supabase.from('applications').update({ status: newStatus }).eq('id', appId);
     if (!error) {
-      setApplications(applications.map((a) => (a.id === appId ? { ...a, status: newStatus } : a)));
+      setApplications((prev) => prev.map((a) => (a.id === appId ? { ...a, status: newStatus } : a)));
       onEventUpdated();
     }
   };
